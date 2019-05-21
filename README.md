@@ -18,7 +18,8 @@ In 1D, for a domain of length L, the analytical solution for the given equation 
 
 ## Videos
 
-[![text](./solution/1D/solution_0.png)](./solution/1D/simulation_and_exact_1D.mp4)
+[<img src='./solution/1D/solution_0.png' height='320px' width='240px'/>](https://jrr3.github.io/Alzheimer/)
+
 
 ## Usage
 
