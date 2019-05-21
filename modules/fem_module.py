@@ -40,7 +40,7 @@ class FEMSimulation():
         self.fast_run          = None
         self.mode              = 'exp'
         self.model_z_n         = 535
-        self.dimension         = 1
+        self.dimension         = 2
         self.polynomial_degree = 2
         self.mesh_density      = 64
         self.dt                = 0.005
@@ -518,12 +518,17 @@ class FEMSimulation():
 #==================================================================
     def create_movie(self):
 
-        wd = self.fem_solution_storage_dir
+        if self.dimension == 1:
+            movie_dir = self.fem_solution_storage_dir
+
+        if self.dimension == 2:
+            movie_dir = os.path.join(self.fem_solution_storage_dir, 'movie')
+
         rx = re.compile('(?P<number>\d+)')
         fnames = []
         fnumbers = []
 
-        for f in os.listdir(wd):
+        for f in os.listdir(movie_dir):
             if '.png' in f:
                 obj = rx.search(f)
                 if obj is not None:
@@ -545,20 +550,17 @@ class FEMSimulation():
             print('Empty list of images')
             return
 
-
-        video_name = 'simulation_and_exact_1D.mp4'
-        video_fname = os.path.join(self.fem_solution_storage_dir,\
-                video_name)
-        im_path = os.path.join(self.fem_solution_storage_dir, images[0])
+        video_name = 'simulation_and_exact_' + str(self.dimension) + 'D.mp4'
+        video_fname = os.path.join(movie_dir, video_name)
+        im_path = os.path.join(movie_dir, images[0])
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
         print(frame.shape)
-        exit()
         video = cv2.VideoWriter(video_fname, 0x7634706d, 15, (width, height))
 
         print('Creating movie:', video_name)
         for im in images:
-            im_path = os.path.join(self.fem_solution_storage_dir, im)
+            im_path = os.path.join(movie_dir, im)
             video.write(cv2.imread(im_path))
 
         cv2.destroyAllWindows()

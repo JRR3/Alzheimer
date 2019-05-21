@@ -5,3 +5,5 @@
 *.png
 *.pyc
 *.txt
+*.pvd
+*.vtu
