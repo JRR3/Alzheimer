@@ -22,7 +22,7 @@ Click on the image and download the video to your computer using the download
 button that will appear to your right.
 [<img src='./solution/1D/solution_0.png' height='380px' width='480px'/>](./solution/1D/simulation_and_exact_1D.mp4)
 
-[<img src='./solution/2D/movie/m_0000.png' height='380px' width='480px'/>](./solution/2D/movie/simulation_and_exact_2D.mp4)
+[<img src='./solution/2D/movie/m_0000.png' width='683px' height='325px'/>](./solution/2D/movie/simulation_and_exact_2D.mp4)
 
 ## Usage
 
