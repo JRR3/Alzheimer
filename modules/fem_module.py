@@ -553,6 +553,7 @@ class FEMSimulation():
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
         print(frame.shape)
+        exit()
         video = cv2.VideoWriter(video_fname, 0x7634706d, 15, (width, height))
 
         print('Creating movie:', video_name)

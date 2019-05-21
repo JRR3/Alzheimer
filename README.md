@@ -18,7 +18,9 @@ In 1D, for a domain of length L, the analytical solution for the given equation 
 
 ## Videos
 
-[<img src='./solution/1D/solution_0.png' height='320px' width='240px'/>](https://jrr3.github.io/Alzheimer/)
+Click on the image and download the video to your computer using the download
+button to your right.
+[<img src='./solution/1D/solution_0.png' height='380px' width='480px'/>](./solution/1D/simulation_and_exact_1D.mp4)
 
 
 ## Usage
@@ -29,9 +31,4 @@ To generate the simulation execute the command:
 python3 driver.py
 ```
 
-To create a movie of the simulation uncomment the line
-
-```python
-obj.create_movie()
-```
 
