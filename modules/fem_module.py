@@ -40,7 +40,7 @@ class FEMSimulation():
         self.fast_run          = None
         self.mode              = 'exp'
         self.model_z_n         = 535
-        self.dimension         = 2
+        self.dimension         = 1
         self.polynomial_degree = 2
         self.mesh_density      = 64
         self.dt                = 0.005
@@ -55,6 +55,7 @@ class FEMSimulation():
         self.counter         = 0
         self.boundary_points = None
         self.figure_format   = '.png'
+        self.video_format    = '.mp4'
 
         self.diffusion_coefficient = 1.0
         self.lam                   = 1
@@ -550,13 +551,20 @@ class FEMSimulation():
             print('Empty list of images')
             return
 
-        video_name = 'simulation_and_exact_' + str(self.dimension) + 'D.mp4'
+        if self.video_format == '.ogv':
+            fourcc = cv2.VideoWriter_fourcc('T','H','E','O')
+
+        elif self.video_format == '.mp4':
+            fourcc = 0x7634706d
+
+        video_name = 'simulation_and_exact_' +\
+                str(self.dimension) + 'D' + self.video_format
         video_fname = os.path.join(movie_dir, video_name)
         im_path = os.path.join(movie_dir, images[0])
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
         print(frame.shape)
-        video = cv2.VideoWriter(video_fname, 0x7634706d, 15, (width, height))
+        video = cv2.VideoWriter(video_fname, fourcc, 15, (width, height))
 
         print('Creating movie:', video_name)
         for im in images:
