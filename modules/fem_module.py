@@ -22,8 +22,9 @@ import matplotlib.pyplot as plt
 #from scipy.spatial import Delaunay as delaunay
 from scipy.integrate import simps as srule
 
+
 from image_manipulation_module import ImageManipulation
-from analytical_solution_1d_module import AnalyticalSolution1D as Exact
+from analytical_solution_1d_dd_module import AnalyticalSolution1D as Exact
 
 #==================================================================
 
@@ -44,7 +45,13 @@ class FEMSimulation():
         self.polynomial_degree = 2
         self.mesh_density      = 64
         self.dt                = 0.005
-        self.domain_length     = 10
+        self.domain_length     = 250
+        self.x_left            = 0
+        self.x_right           = +self.domain_length
+        self.plot_true_solution= True
+        self.use_nonlinear     = True
+        self.plot_symmetric    = False
+
 
         self.exact_solution    = Exact(self.domain_length)
         self.image_manipulation_obj = ImageManipulation()
@@ -55,7 +62,9 @@ class FEMSimulation():
         self.counter         = 0
         self.boundary_points = None
         self.figure_format   = '.png'
-        self.video_format    = '.mp4'
+        #self.video_format    = '.mp4'
+        #self.video_format    = '.ogv'
+        self.video_format    = '.webm'
 
         self.diffusion_coefficient = 1.0
         self.lam                   = 1
@@ -194,12 +203,25 @@ class FEMSimulation():
         else:
 
             if self.dimension == 1:
+
                 self.alpha        = 0
                 self.beta         = 0
-                self.lam          = 1.0
+                #self.lam          = 1.0
+                self.lam          = 0.0
                 self.kappa        = 30
 
+                if self.use_nonlinear: 
+
+                    self.initial_time    = 4.4
+                    self.final_time      = 126
+                    self.dt              = 0.25
+
+                    #self.initial_time    = 0.01
+                    #self.final_time      = 40
+                    #self.dt              = 0.01
+
             elif self.dimension == 2:
+
                 self.alpha        = 4.3590
                 self.beta         = -0.156
                 self.lam          = 1.0
@@ -280,7 +302,8 @@ class FEMSimulation():
             '''
             Constant RHS for the experimental case
             '''
-            self.rhs_fun = fe.Constant(1)
+            self.rhs_fun = fe.Constant(0)
+            self.rhs_fun = fe.Expression('1/(2*t)', degree=2, t = 0.01)
 
 #==================================================================
     def create_boundary_conditions(self):
@@ -295,19 +318,66 @@ class FEMSimulation():
             '''
             Constant boundary conditions
             '''
-            self.boundary_fun = fe.Constant(1)
 
 
         if self.dimension == 2:
+            self.boundary_fun = fe.Constant(1)
             def is_on_the_boundary(x, on_boundary):
                 return on_boundary and 4.34 < x[0]
 
+        tol = 1e-6
         if self.dimension == 1:
+
+            self.boundary_fun = fe.Expression('x[0] < 1e-6 ? 1 : 0', degree=0)
+
+            c    = -5 / np.sqrt(6)
+            txt = 'pow(1+exp((x[0]+C*t)/sqrt(6)), -2)'
+            self.boundary_fun = fe.Expression(txt, degree=2, C=c, t=0)
+
+            #self.boundary_fun = fe.Expression(\
+                    #'exp(-x[0]*x[0]/(4*t))', degree=2, t=0.01)
+
             def is_on_the_boundary(x, on_boundary):
-                return on_boundary and x[0] < 1e-6
+                return on_boundary
+                #return on_boundary and x[0] < 1e-6
+                #return False
 
         self.boundary_conditions = fe.DirichletBC(\
                 self.function_space, self.boundary_fun, is_on_the_boundary)
+
+#==================================================================
+    def V(self, z):
+        return np.power(1+1*np.exp(z / np.sqrt(6)), -2.)
+
+    def tw(self, x, t):
+        c = -5 / np.sqrt(6)
+        return self.V(x + c*t)
+
+    def smg(self, x, t):
+        return np.exp(-(x**2)/(4*t))
+
+#==================================================================
+    def plot_smg(self):
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        t = 40.1
+        x = np.linspace(-10,10,5000)
+        ax.plot(x, self.smg(x,t),'b-')
+        ax.set_ylim([0-1e-3,1+1e-3])
+        fig.savefig(os.path.join(self.fem_solution_storage_dir,'a.pdf'))
+
+#==================================================================
+    def plot_traveling_wave(self):
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        t = 8
+        x = np.linspace(-10,10,5000)
+        ax.plot(x, self.tw(x,t),'b-')
+        ax.set_ylim([0-1e-3,1+1e-3])
+        fig.savefig(os.path.join(self.fem_solution_storage_dir,'a.pdf'))
+
 
 #==================================================================
     def create_simple_mesh(self):
@@ -333,7 +403,8 @@ class FEMSimulation():
         nx = ny = self.mesh_density
 
         if self.dimension == 1: 
-            self.mesh = fe.IntervalMesh(nx, 0, self.domain_length)
+
+            self.mesh = fe.IntervalMesh(nx, self.x_left, self.x_right)
 
 
         if self.dimension == 2: 
@@ -414,8 +485,10 @@ class FEMSimulation():
                 self.u_n = fe.project(self.ic_fun, self.function_space)
 
             if self.dimension == 1:
-                self.u_n = fe.interpolate(fe.Constant(0), self.function_space)
-                self.u_n.vector()[self.dof_map[0]] = 1
+                #self.u_n = fe.interpolate(fe.Constant(0), self.function_space)
+                #self.u_n.vector()[self.dof_map[0]] = 1
+                self.boundary_fun.t = self.current_time
+                self.u_n = fe.interpolate(self.boundary_fun, self.function_space)
 
         self.u = fe.Function(self.function_space)
 
@@ -434,7 +507,11 @@ class FEMSimulation():
                 (u * v * fe.dx) + self.dt * self.diffusion_coefficient *\
                 (fe.dot(fe.grad(u), fe.grad(v)) * fe.dx)
 
-        self.rhs = (self.u_n + self.dt * self.rhs_fun) * v * fe.dx
+        self.rhs = (\
+                self.u_n +\
+                0 * self.dt * self.rhs_fun * self.u_n +\
+                1 * self.use_nonlinear * self.dt * (1-self.u_n) * self.u_n\
+                ) * v * fe.dx
 
 #==================================================================
     def solve_problem(self):
@@ -462,6 +539,11 @@ class FEMSimulation():
         y   = self.u_n.vector().get_local()[self.dof_map]
 
         ax.plot(self.ordered_mesh, y, 'ko', linewidth=2, label='Approx.')
+
+        if self.plot_symmetric:
+                reflected_mesh = -self.ordered_mesh[::-1]
+                ax.plot(reflected_mesh, y[::-1], 'ko', linewidth=2)
+
         auc = srule(y,self.ordered_mesh)
 
         if self.mode == 'test':
@@ -471,15 +553,33 @@ class FEMSimulation():
 
         else:
             eps = 1e-2
-            y_true = self.exact_solution.U(\
-                    self.ordered_mesh, self.current_time)
-            ax.plot(self.ordered_mesh, y_true,\
-                    'b-', linewidth=2, label='Exact')
+            if self.plot_true_solution:
+
+                if self.use_nonlinear:
+                    y_true = self.tw(\
+                            self.ordered_mesh, self.current_time)
+
+                    #y_true = self.smg(\
+                            #self.ordered_mesh, self.current_time)
+                else:
+                    y_true = self.exact_solution.U(\
+                            self.ordered_mesh, self.current_time)
+
+                ax.plot(self.ordered_mesh, y_true,\
+                        'b-', linewidth=2, label='Exact')
+
+                if self.plot_symmetric:
+                        ax.plot(reflected_mesh, y_true[::-1],\
+                                'b-', linewidth=2)
+
             ax.set_ylim([0-eps,1+eps])
-            ax.set_xlim([0-eps,self.domain_length+eps])
+            ax.set_xlim([self.x_left-eps, self.x_right+eps])
+
+            if self.plot_symmetric:
+                ax.set_xlim([-self.x_right-eps, self.x_right+eps])
 
 
-        txt = 't = ' + '{:0.3f}'.format(self.current_time) +\
+        txt = 't = ' + '{:0.3f}'.format(self.current_time-self.initial_time) +\
                 ', AUC: ' + '{:0.3f}'.format(auc)
         ax.text(0.1, 0.1, txt, fontsize=16)
 
@@ -552,19 +652,23 @@ class FEMSimulation():
             return
 
         if self.video_format == '.ogv':
-            fourcc = cv2.VideoWriter_fourcc('T','H','E','O')
+            fourcc = cv2.VideoWriter_fourcc(*'THEO')
 
         elif self.video_format == '.mp4':
             fourcc = 0x7634706d
 
-        video_name = 'simulation_and_exact_' +\
+        elif self.video_format == '.webm':
+            fourcc = cv2.VideoWriter_fourcc(*'VP80')
+
+        video_name = 'simulation_' +\
                 str(self.dimension) + 'D' + self.video_format
         video_fname = os.path.join(movie_dir, video_name)
         im_path = os.path.join(movie_dir, images[0])
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
         print(frame.shape)
-        video = cv2.VideoWriter(video_fname, fourcc, 15, (width, height))
+        fps = 30
+        video = cv2.VideoWriter(video_fname, fourcc, 30, (width, height))
 
         print('Creating movie:', video_name)
         for im in images:
