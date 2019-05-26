@@ -24,7 +24,7 @@ from scipy.integrate import simps as srule
 
 
 from image_manipulation_module import ImageManipulation
-from analytical_solution_1d_dd_module import AnalyticalSolution1D as Exact
+#from analytical_solution_1d_dd_module import AnalyticalSolution1D as Exact
 
 #==================================================================
 
@@ -53,7 +53,7 @@ class FEMSimulation():
         self.plot_symmetric    = False
 
 
-        self.exact_solution    = Exact(self.domain_length)
+        #self.exact_solution    = Exact(self.domain_length)
         self.image_manipulation_obj = ImageManipulation()
 
         self.initial_time    = 0
@@ -382,23 +382,6 @@ class FEMSimulation():
 #==================================================================
     def create_simple_mesh(self):
 
-        #domain      = mesher.Circle(fe.Point(0,0), 1)
-        #mesh        = mesher.generate_mesh(domain, 64)
-        '''
-        domain_vertices = [\
-                fe.Point(0.0, 0.0),\
-                fe.Point(10.0, 0.0),\
-                fe.Point(10.0, 2.0),\
-                fe.Point(8.0, 2.0),\
-                fe.Point(7.5, 1.0),\
-                fe.Point(2.5, 1.0),\
-                fe.Point(2.0, 4.0),\
-                fe.Point(0.0, 4.0),\
-                fe.Point(0.0, 0.0)]
-
-        geo = mesher.Polygon(domain_vertices)
-        self.mesh   = mesher.generate_mesh(geo, 64);
-        '''
         print('Creating simple mesh')
         nx = ny = self.mesh_density
 
@@ -553,6 +536,7 @@ class FEMSimulation():
 
         else:
             eps = 1e-2
+
             if self.plot_true_solution:
 
                 if self.use_nonlinear:
@@ -684,14 +668,14 @@ class FEMSimulation():
 #==================================================================
     def run(self):
 
-        self.set_parameters()
-        self.create_exact_solution_and_rhs_fun_strings()
-        self.create_initial_condition_function()
-        self.create_rhs_fun()
+        #self.set_parameters()
+        #self.create_exact_solution_and_rhs_fun_strings()
+        #self.create_initial_condition_function()
+        #self.create_rhs_fun()
         self.create_mesh()
         self.set_function_spaces()
         self.dofs_to_coordinates()
-        self.create_boundary_conditions()
+        #self.create_boundary_conditions()
         self.set_initial_conditions()
         self.create_bilinear_form_and_rhs()
 

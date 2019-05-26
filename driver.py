@@ -12,7 +12,6 @@ import os
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import re
-import fenics as fe
 
 #==================================================================
 
@@ -20,11 +19,15 @@ sys.path.insert(0, './modules')
 from timing_module import TimeIt
 from brain_slice_module import BrainSection
 from image_manipulation_module import ImageManipulation
-from fem_module import FEMSimulation
+#from fem_module import FEMSimulation
+from dirichlet_dirichlet_module import DirichletDirichlet as PDE
 
 #==================================================================
 
-obj = ImageManipulation()
+obj = PDE()
+#obj.run()
+obj.create_movie()
+#obj = ImageManipulation()
 #obj.get_radial_plot()
 
 #obj.store_boundary_data()
@@ -33,7 +36,7 @@ obj = ImageManipulation()
 #obj.plot_interpolated_slices()
 #obj.plot_sphere()
 
-obj = FEMSimulation()
+#obj = FEMSimulation()
 #obj.plot_traveling_wave()
 #obj.plot_smg()
 #exit()
@@ -42,9 +45,8 @@ obj = FEMSimulation()
 #obj.optimize()
 #obj.full_brain_mesh()
 #obj.plot_coordinate_map()
-obj.run()
-obj.create_movie()
+#obj.run()
+#obj.create_movie()
 
-#x  = obj.map_experimental_z_n_to_model_z_n(2)
-#print(obj.map_model_z_n_to_mm(1000))
+
 
