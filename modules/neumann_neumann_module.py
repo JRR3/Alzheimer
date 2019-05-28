@@ -24,14 +24,14 @@ from scipy.integrate import simps as srule
 
 from image_manipulation_module import ImageManipulation
 
-class DirichletDirichlet():
+class NeumannNeumann():
 
 #==================================================================
     def __init__(self):
 
-        self.label        = 'DD'
+        self.label        = 'NN'
         self.n_components = 1000
-        self.L            = 5/np.sqrt(3) * np.pi
+        self.L            = 10
         self.time         = 0
         self.fast_run     = False
 
@@ -126,7 +126,7 @@ class DirichletDirichlet():
                     fe.Expression('x[0] < 1e-6 ? 1 : 0', degree=0)
 
             def is_on_the_boundary(x, on_boundary):
-                return on_boundary
+                return on_boundary and False
 
         self.boundary_conditions = fe.DirichletBC(\
                 self.function_space, self.boundary_fun,\
@@ -142,11 +142,9 @@ class DirichletDirichlet():
             pass
 
         if self.dimension == 1:
+            sigmoidal = fe.Expression('1/( 1 + exp(30*(x[0]-0.5)))', degree=2)
+            self.u_n = fe.interpolate(sigmoidal, self.function_space)
 
-            self.u_n = fe.interpolate(fe.Constant(0),\
-                    self.function_space)
-
-            self.u_n.vector()[self.dof_map[0]] = 1
 
         self.u = fe.Function(self.function_space)
 
@@ -175,7 +173,7 @@ class DirichletDirichlet():
                 reflected_mesh = -self.ordered_mesh[::-1]
                 ax.plot(reflected_mesh, y[::-1], 'ko', linewidth=2)
 
-        auc = srule(y,self.ordered_mesh)
+        auc = srule(y, self.ordered_mesh)
 
         eps = 1e-2
 
@@ -190,7 +188,7 @@ class DirichletDirichlet():
                     ax.plot(reflected_mesh, y_true[::-1],\
                             'b-', linewidth=2)
 
-            ax.set_ylim([0-eps,1+eps])
+            ax.set_ylim([-0-eps,1+eps])
             ax.set_xlim([self.x_left-eps, self.x_right+eps])
 
             if self.plot_symmetric:
@@ -217,38 +215,48 @@ class DirichletDirichlet():
 
 #==================================================================
     def X(self, m, x):
-        return np.sin(x * self.lambda_m(m))
+        return np.cos(x * self.lambda_m(m))
+
+#==================================================================
+    def initial_condition(self, x):
+        return 1/(1 + np.exp(30*(x-0.5)))
 
 #==================================================================
     def IC(self, m):
-        return -2 /  ( m * np.pi )
+        norm_sq = self.L
+        if 0 < m:
+            norm_sq /= 2
+        x = np.linspace(0, self.L, 5000)
+        y  = self.initial_condition(x) - self.shift(x)
+        y *= self.X(m, x)
+        auc  = srule(y, x)
+        auc /= norm_sq
+        return auc
+
 
 #==================================================================
     def W(self, m, t=0):
         lm_sq_p1 = self.lambda_m(m)**2 + 1
         exp_term = np.exp(-t * lm_sq_p1) 
-        non_ic   = 2 * (-1)**m / (lm_sq_p1 * np.pi * m)
-        non_ic   *= (exp_term - 1)
-        ic       =  self.IC(m) * exp_term
-        return non_ic + ic
+        return exp_term
 
 
 #==================================================================
     def shift(self, x):
-        return 1 - x/self.L
+        return 1 - x * 0
 
 
 #==================================================================
     def steady_state(self,x):
         #CHECK
-        return np.exp(x/2) * np.cos(np.sqrt(3)/2*x)
+        return 0
 
 
 #==================================================================
     def U(self, x, t):
         s = self.shift(x)
-        for i in range(1,self.n_components):
-            increment = self.W(i, t) * self.X(i, x)
+        for i in range(0,self.n_components):
+            increment = self.W(i, t) * self.IC(i) * self.X(i, x)
             s += increment
         return s
 
@@ -409,10 +417,9 @@ class DirichletDirichlet():
     def solve_problem(self):
 
         '''
-        Dirichlet boundary conditions
+        LR_Neumann boundary conditions
         '''
-        fe.solve(self.bilinear_form == self.rhs,\
-                self.u, self.boundary_conditions)
+        fe.solve(self.bilinear_form == self.rhs, self.u)
 
 #==================================================================
     def compute_error(self):

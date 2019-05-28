@@ -24,14 +24,14 @@ from scipy.integrate import simps as srule
 
 from image_manipulation_module import ImageManipulation
 
-class DirichletDirichlet():
+class DirichletNeumann():
 
 #==================================================================
     def __init__(self):
 
-        self.label        = 'DD'
+        self.label        = 'DN'
         self.n_components = 1000
-        self.L            = 5/np.sqrt(3) * np.pi
+        self.L            = 10
         self.time         = 0
         self.fast_run     = False
 
@@ -126,7 +126,7 @@ class DirichletDirichlet():
                     fe.Expression('x[0] < 1e-6 ? 1 : 0', degree=0)
 
             def is_on_the_boundary(x, on_boundary):
-                return on_boundary
+                return on_boundary and x[0] < 1e-6
 
         self.boundary_conditions = fe.DirichletBC(\
                 self.function_space, self.boundary_fun,\
@@ -213,7 +213,7 @@ class DirichletDirichlet():
 
 #==================================================================
     def lambda_m(self, m):
-        return np.pi * m / self.L
+        return np.pi * (m + 0.5) / self.L
 
 #==================================================================
     def X(self, m, x):
@@ -221,33 +221,30 @@ class DirichletDirichlet():
 
 #==================================================================
     def IC(self, m):
-        return -2 /  ( m * np.pi )
+        return -4/(np.pi * (2*m + 1))
 
 #==================================================================
     def W(self, m, t=0):
         lm_sq_p1 = self.lambda_m(m)**2 + 1
         exp_term = np.exp(-t * lm_sq_p1) 
-        non_ic   = 2 * (-1)**m / (lm_sq_p1 * np.pi * m)
-        non_ic   *= (exp_term - 1)
-        ic       =  self.IC(m) * exp_term
-        return non_ic + ic
+        return self.IC(m) * exp_term
 
 
 #==================================================================
     def shift(self, x):
-        return 1 - x/self.L
+        return 1 - x * 0
 
 
 #==================================================================
     def steady_state(self,x):
         #CHECK
-        return np.exp(x/2) * np.cos(np.sqrt(3)/2*x)
+        return 0
 
 
 #==================================================================
     def U(self, x, t):
         s = self.shift(x)
-        for i in range(1,self.n_components):
+        for i in range(0,self.n_components):
             increment = self.W(i, t) * self.X(i, x)
             s += increment
         return s

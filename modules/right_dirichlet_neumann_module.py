@@ -14,24 +14,21 @@ import re
 import cv2
 
 
-#from scipy.optimize import least_squares as lsq
 import matplotlib as mpl
 mpl.rcParams.update({'font.size': 18})
 import matplotlib.pyplot as plt
-#from mpl_toolkits.mplot3d import Axes3D
-#from scipy.spatial import Delaunay as delaunay
 from scipy.integrate import simps as srule
 
 from image_manipulation_module import ImageManipulation
 
-class DirichletDirichlet():
+class RightDirichletNeumann():
 
 #==================================================================
     def __init__(self):
 
-        self.label        = 'DD'
+        self.label        = 'RDN'
         self.n_components = 1000
-        self.L            = 5/np.sqrt(3) * np.pi
+        self.L            = 1
         self.time         = 0
         self.fast_run     = False
 
@@ -39,11 +36,11 @@ class DirichletDirichlet():
         self.mode         = 'exp'
         self.dimension    = 1
         self.polynomial_degree = 2
-        self.mesh_density = 64
-        self.dt           = 0.01
+        self.mesh_density = 50
+        self.dt           = 0.0001
         self.x_left       = 0
         self.x_right      = self.L
-        self.fps          = 15
+        self.fps          = 3
 
         self.image_manipulation_obj = ImageManipulation()
 
@@ -85,9 +82,8 @@ class DirichletDirichlet():
         self.movie_dir = os.path.join(self.fem_solution_storage_dir, 'movie')
 
         self.u_experimental = None
-        self.residual_list  = None
 
-        self.plot_true_solution= True
+        self.plot_true_solution= False
         self.plot_symmetric    = False
 
 #==================================================================
@@ -126,7 +122,7 @@ class DirichletDirichlet():
                     fe.Expression('x[0] < 1e-6 ? 1 : 0', degree=0)
 
             def is_on_the_boundary(x, on_boundary):
-                return on_boundary
+                return on_boundary and False
 
         self.boundary_conditions = fe.DirichletBC(\
                 self.function_space, self.boundary_fun,\
@@ -142,11 +138,9 @@ class DirichletDirichlet():
             pass
 
         if self.dimension == 1:
+            sigmoidal = fe.Expression('1/( 1 + exp(30*(x[0]-0.5)))', degree=2)
+            self.u_n = fe.interpolate(sigmoidal, self.function_space)
 
-            self.u_n = fe.interpolate(fe.Constant(0),\
-                    self.function_space)
-
-            self.u_n.vector()[self.dof_map[0]] = 1
 
         self.u = fe.Function(self.function_space)
 
@@ -159,43 +153,15 @@ class DirichletDirichlet():
         if self.fast_run:
             return
 
-        if self.dimension == 2:
-            self.vtkfile << (self.u_n, self.current_time)
-            self.counter += 1
-            return
-
         fig = plt.figure()
         ax  = fig.add_subplot(111)
-        y   = self.u_n.vector().get_local()[self.dof_map]
+        y   = self.u_n
 
-        ax.plot(self.ordered_mesh, y, 'ko', linewidth=2, label='Approx.')
+        ax.plot(self.mesh, y, 'ko', linewidth=2, label='Approx.')
 
-        if self.plot_symmetric:
-
-                reflected_mesh = -self.ordered_mesh[::-1]
-                ax.plot(reflected_mesh, y[::-1], 'ko', linewidth=2)
-
-        auc = srule(y,self.ordered_mesh)
+        auc = srule(y, self.mesh)
 
         eps = 1e-2
-
-        if self.plot_true_solution:
-
-            y_true = self.U(self.ordered_mesh, self.current_time)
-
-            ax.plot(self.ordered_mesh, y_true,\
-                    'b-', linewidth=2, label='Exact')
-
-            if self.plot_symmetric:
-                    ax.plot(reflected_mesh, y_true[::-1],\
-                            'b-', linewidth=2)
-
-            ax.set_ylim([0-eps,1+eps])
-            ax.set_xlim([self.x_left-eps, self.x_right+eps])
-
-            if self.plot_symmetric:
-                ax.set_xlim([-self.x_right-eps, self.x_right+eps])
-
 
         txt = 't = ' + '{:0.3f}'.\
                 format(self.current_time-self.initial_time) +\
@@ -207,6 +173,7 @@ class DirichletDirichlet():
         fname = 'solution_' + str(self.counter) + self.figure_format
         fname = os.path.join(self.fem_solution_storage_dir, fname)
         self.counter += 1
+        ax.set_ylim([-2-eps,1+eps])
         fig.savefig(fname, dpi=150)
         plt.close('all')
 
@@ -217,38 +184,48 @@ class DirichletDirichlet():
 
 #==================================================================
     def X(self, m, x):
-        return np.sin(x * self.lambda_m(m))
+        return np.cos(x * self.lambda_m(m))
+
+#==================================================================
+    def initial_condition(self, x):
+        return 1/(1 + np.exp(30*(x-0.5)))
 
 #==================================================================
     def IC(self, m):
-        return -2 /  ( m * np.pi )
+        norm_sq = self.L
+        if 0 < m:
+            norm_sq /= 2
+        x = np.linspace(0, self.L, 5000)
+        y  = self.initial_condition(x) - self.shift(x)
+        y *= self.X(m, x)
+        auc  = srule(y, x)
+        auc /= norm_sq
+        return auc
+
 
 #==================================================================
     def W(self, m, t=0):
         lm_sq_p1 = self.lambda_m(m)**2 + 1
         exp_term = np.exp(-t * lm_sq_p1) 
-        non_ic   = 2 * (-1)**m / (lm_sq_p1 * np.pi * m)
-        non_ic   *= (exp_term - 1)
-        ic       =  self.IC(m) * exp_term
-        return non_ic + ic
+        return exp_term
 
 
 #==================================================================
     def shift(self, x):
-        return 1 - x/self.L
+        return 1 - x * 0
 
 
 #==================================================================
     def steady_state(self,x):
         #CHECK
-        return np.exp(x/2) * np.cos(np.sqrt(3)/2*x)
+        return 0
 
 
 #==================================================================
     def U(self, x, t):
         s = self.shift(x)
-        for i in range(1,self.n_components):
-            increment = self.W(i, t) * self.X(i, x)
+        for i in range(0,self.n_components):
+            increment = self.W(i, t) * self.IC(i) * self.X(i, x)
             s += increment
         return s
 
@@ -293,7 +270,7 @@ class DirichletDirichlet():
         images = []
 
         for i in range(len(fnames)):
-            if i % 1 == 0 and i < np.inf:
+            if i % 1 == 0 and i < 17:
                 images.append(fnames[i])
 
         if len(images) == 0:
@@ -409,10 +386,9 @@ class DirichletDirichlet():
     def solve_problem(self):
 
         '''
-        Dirichlet boundary conditions
+        LR_Neumann boundary conditions
         '''
-        fe.solve(self.bilinear_form == self.rhs,\
-                self.u, self.boundary_conditions)
+        fe.solve(self.bilinear_form == self.rhs, self.u)
 
 #==================================================================
     def compute_error(self):
@@ -435,32 +411,41 @@ class DirichletDirichlet():
 
         self.error_list.append(error_L2) 
 
-
 #==================================================================
     def run(self):
-
         self.set_data_dirs()
-        self.create_rhs_fun()
-        self.create_mesh()
-        self.set_function_spaces()
-        self.dofs_to_coordinates()
-        self.create_boundary_conditions()
-        self.set_initial_conditions()
-        self.create_bilinear_form_and_rhs()
+        neumann_fun   = lambda t: 0
+        ic_fun        = lambda x: 1/(1+np.exp(100*(x-0.05)))
+        dirichlet_fun = lambda t: 0
+        self.mesh     = np.linspace(0,self.L, self.mesh_density)
+        self.current_time = 0
+        self.u_n = ic_fun(self.mesh)
+        self.save_snapshot()
+        self.u   = self.u_n * 0
+        dx = self.mesh[1]-self.mesh[0]
+        dx_sq = dx * dx
+        k  = self.dt/dx_sq
 
+        print('dx',dx)
+        print('dt',self.dt)
+        print('k',k)
         while self.current_time < self.final_time: 
             
             self.current_time += self.dt
             print('t(', self.counter, ')= {:0.3f}'.format(self.current_time))
-            self.boundary_fun.t = self.current_time
-            self.rhs_fun.t      = self.current_time
-            self.solve_problem()
-            self.u_n.assign(self.u)
-            self.compute_error()
+            self.u[-1] = dirichlet_fun(self.current_time)
+            #print('u[',self.mesh_density-1,']=',self.u[-1])
+            self.u[-2] = self.u[-1] - dx * neumann_fun(self.current_time)
+            #print('u[',self.mesh_density-2,']=',self.u[-2])
+            for i in range(self.mesh_density-2,0,-1):
+                self.u[i-1] = (self.u[i] - self.u_n[i])/k -\
+                        self.u[i+1] + 2*self.u[i] -\
+                        dx_sq * (1 - self.u[i]) 
+                #print('u[',i-1,']=', self.u[i-1])
+            self.u_n = self.u + 0
             self.save_snapshot()
             print('------------------------')
-            
-        
+
         print('Alles ist gut')
 
 

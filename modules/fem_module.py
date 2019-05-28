@@ -51,6 +51,7 @@ class FEMSimulation():
         self.plot_true_solution= True
         self.use_nonlinear     = True
         self.plot_symmetric    = False
+        self.fps               = 30
 
 
         #self.exact_solution    = Exact(self.domain_length)
@@ -651,7 +652,6 @@ class FEMSimulation():
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
         print(frame.shape)
-        fps = 30
         video = cv2.VideoWriter(video_fname, fourcc, 30, (width, height))
 
         print('Creating movie:', video_name)

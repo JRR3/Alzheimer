@@ -20,7 +20,12 @@ from timing_module import TimeIt
 from brain_slice_module import BrainSection
 from image_manipulation_module import ImageManipulation
 #from fem_module import FEMSimulation
-from dirichlet_dirichlet_module import DirichletDirichlet as PDE
+#from dirichlet_dirichlet_module import DirichletDirichlet as PDE
+#from dirichlet_neumann_module import DirichletNeumann as PDE
+#from neumann_neumann_module import NeumannNeumann as PDE
+from traveling_wave_module import TravelingWave as PDE
+#from time_damped_module import TimeDamped as PDE
+#from right_dirichlet_neumann_module import RightDirichletNeumann as PDE
 
 #==================================================================
 

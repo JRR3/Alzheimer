@@ -24,41 +24,51 @@ from scipy.integrate import simps as srule
 
 from image_manipulation_module import ImageManipulation
 
-class DirichletDirichlet():
+class TravelingWave():
 
 #==================================================================
     def __init__(self):
 
-        self.label        = 'DD'
-        self.n_components = 1000
-        self.L            = 5/np.sqrt(3) * np.pi
+        self.label        = 'TW'
+        self.n_components = 0
+        self.L            = 250
         self.time         = 0
         self.fast_run     = False
+        self.model_z_n    = 535
+        self.hole_radius  = 0.2
 
         #self.set_fem_properties()
         self.mode         = 'exp'
-        self.dimension    = 1
+        self.dimension    = 2
         self.polynomial_degree = 2
         self.mesh_density = 64
-        self.dt           = 0.01
         self.x_left       = 0
         self.x_right      = self.L
-        self.fps          = 15
+        self.fps          = 0
 
         self.image_manipulation_obj = ImageManipulation()
 
-        self.initial_time    = 0
-        self.final_time      = 2.0
+        if self.dimension == 1:
+            self.dt           = 0.25
+            self.initial_time = 4.4
+            self.final_time   = 126
+
+        if self.dimension == 2:
+            self.dt           = 0.01
+            self.initial_time = 0
+            self.final_time   = 8
+
         self.current_time    = None
         self.counter         = 0
         self.boundary_points = None
         self.figure_format   = '.png'
         self.video_format    = '.webm'
 
-        self.alpha        = 0
-        self.beta         = 0
-        self.lam          = 1.0
-        self.kappa        = 0
+        self.alpha        = 4.3590
+        self.beta         = -0.156
+        self.lam          = 0
+        self.kappa        = 30
+
         self.diffusion_coefficient = 1.0
 
         self.error_list   = []
@@ -109,7 +119,7 @@ class DirichletDirichlet():
 #==================================================================
     def create_rhs_fun(self):
 
-        self.rhs_fun = fe.Constant(1)
+        self.rhs_fun = fe.Constant(0)
 
 #==================================================================
     def create_boundary_conditions(self):
@@ -122,11 +132,12 @@ class DirichletDirichlet():
         tol = 1e-6
         if self.dimension == 1:
 
-            self.boundary_fun =\
-                    fe.Expression('x[0] < 1e-6 ? 1 : 0', degree=0)
+            c    = -5 / np.sqrt(6)
+            txt = 'pow(1+exp((x[0]+C*t)/sqrt(6)), -2)'
+            self.boundary_fun = fe.Expression(txt, degree=2, C=c, t=0)
 
             def is_on_the_boundary(x, on_boundary):
-                return on_boundary
+                return on_boundary 
 
         self.boundary_conditions = fe.DirichletBC(\
                 self.function_space, self.boundary_fun,\
@@ -138,15 +149,18 @@ class DirichletDirichlet():
         self.current_time = self.initial_time 
 
         if self.dimension == 2:
-            #self.u_n = fe.project(self.ic_fun, self.function_space)
-            pass
+            self.ic_fun = fe.Expression(\
+                    'exp(-kappa * (pow(x[0]-alpha,2) + pow(x[1]-beta,2)))',\
+                    degree = 2,\
+                    alpha  = self.alpha,\
+                    beta   = self.beta,\
+                    kappa  = self.kappa)
+            self.u_n = fe.project(self.ic_fun, self.function_space)
 
         if self.dimension == 1:
+            self.boundary_fun.t = self.current_time
+            self.u_n = fe.interpolate(self.boundary_fun, self.function_space)
 
-            self.u_n = fe.interpolate(fe.Constant(0),\
-                    self.function_space)
-
-            self.u_n.vector()[self.dof_map[0]] = 1
 
         self.u = fe.Function(self.function_space)
 
@@ -175,7 +189,7 @@ class DirichletDirichlet():
                 reflected_mesh = -self.ordered_mesh[::-1]
                 ax.plot(reflected_mesh, y[::-1], 'ko', linewidth=2)
 
-        auc = srule(y,self.ordered_mesh)
+        auc = srule(y, self.ordered_mesh)
 
         eps = 1e-2
 
@@ -190,7 +204,7 @@ class DirichletDirichlet():
                     ax.plot(reflected_mesh, y_true[::-1],\
                             'b-', linewidth=2)
 
-            ax.set_ylim([0-eps,1+eps])
+            ax.set_ylim([-0-eps,1+eps])
             ax.set_xlim([self.x_left-eps, self.x_right+eps])
 
             if self.plot_symmetric:
@@ -216,41 +230,14 @@ class DirichletDirichlet():
         return np.pi * m / self.L
 
 #==================================================================
-    def X(self, m, x):
-        return np.sin(x * self.lambda_m(m))
-
-#==================================================================
-    def IC(self, m):
-        return -2 /  ( m * np.pi )
-
-#==================================================================
-    def W(self, m, t=0):
-        lm_sq_p1 = self.lambda_m(m)**2 + 1
-        exp_term = np.exp(-t * lm_sq_p1) 
-        non_ic   = 2 * (-1)**m / (lm_sq_p1 * np.pi * m)
-        non_ic   *= (exp_term - 1)
-        ic       =  self.IC(m) * exp_term
-        return non_ic + ic
-
-
-#==================================================================
-    def shift(self, x):
-        return 1 - x/self.L
-
-
-#==================================================================
-    def steady_state(self,x):
-        #CHECK
-        return np.exp(x/2) * np.cos(np.sqrt(3)/2*x)
+    def W(self, z):
+        return np.power(1+1*np.exp(z / np.sqrt(6)), -2.)
 
 
 #==================================================================
     def U(self, x, t):
-        s = self.shift(x)
-        for i in range(1,self.n_components):
-            increment = self.W(i, t) * self.X(i, x)
-            s += increment
-        return s
+        c = -5 / np.sqrt(6)
+        return self.W(x + c*t)
 
 #==================================================================
     def plot_exact_solution(self, t = 1): 
@@ -316,7 +303,13 @@ class DirichletDirichlet():
         im_path = os.path.join(self.fem_solution_storage_dir, images[0])
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
-        print(np.array(frame.shape)/2)
+        print('(H,W) = ', np.array(frame.shape)/2)
+
+        if self.dimension == 1:
+            self.fps = 30
+        if self.dimension == 2:
+            self.fps = 30
+
         video = cv2.VideoWriter(video_fname, fourcc, self.fps, (width, height))
 
         print('Creating movie:', video_name)
@@ -366,10 +359,71 @@ class DirichletDirichlet():
         for x,y in zip(self.boundary_points[0], self.boundary_points[1]):
             domain_vertices.append(fe.Point(x,y))
 
-        geo         = mesher.Polygon(domain_vertices)
-        self.mesh   = mesher.generate_mesh(geo, self.mesh_density);
+        self.geometry = mesher.Polygon(domain_vertices)
+        self.mesh     = mesher.generate_mesh(self.geometry, 16);
 
-        #self.plot_mesh()
+        self.puncture_mesh()
+
+#==================================================================
+    def generate_holes(self):
+
+        fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
+        if os.path.exists(fname):
+            print('Found a file containing the hole data')
+            return np.loadtxt(fname)
+
+        boundary = fe.BoundaryMesh(self.mesh, 'exterior')
+        bbtree   = fe.BoundingBoxTree()
+        bbtree.build(boundary)
+
+        np.random.seed(123)
+        N = 40
+        max_n_tries = 1e6
+        counter = 0
+        L = []
+        gap = 0.1
+
+        while len(L) < N and counter < max_n_tries:
+
+            counter += 1
+            x = np.random.rand()*8 - 4
+            y = np.random.rand()*4.8 - 2.4
+            p = np.array([x,y])
+            p_fenics = fe.Point(p)
+            _, distance_to_boundary = bbtree.compute_closest_entity(p_fenics)
+
+            rejected = False
+
+            if distance_to_boundary < self.hole_radius + gap:
+                continue
+
+            for c in L: 
+                if np.linalg.norm(c-p) < 2*self.hole_radius + gap:
+                    rejected = True
+                    break
+
+            if not rejected:
+                L.append(p)
+
+        L = np.array(L)
+        fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
+        np.savetxt(fname, L)
+
+        print('Found', N, 'circles in', counter, 'trials')
+
+        return L
+
+#==================================================================
+    def puncture_mesh(self): 
+
+        L = self.generate_holes()
+
+        for p in L:
+            circle = mesher.Circle(fe.Point(p), self.hole_radius) 
+            self.geometry -= circle
+
+        self.mesh = mesher.generate_mesh(self.geometry, self.mesh_density);
+        print('Done with the mesh generation')
 
 #==================================================================
     def set_function_spaces(self):
@@ -403,13 +457,15 @@ class DirichletDirichlet():
                 (u * v * fe.dx) + self.dt * self.diffusion_coefficient *\
                 (fe.dot(fe.grad(u), fe.grad(v)) * fe.dx)
 
-        self.rhs = (self.u_n + self.dt * self.rhs_fun) * v * fe.dx
+        self.rhs = (\
+                self.u_n + self.dt * (1-self.u_n) * self.u_n\
+                ) * v * fe.dx
 
 #==================================================================
     def solve_problem(self):
 
         '''
-        Dirichlet boundary conditions
+        Boundary conditions
         '''
         fe.solve(self.bilinear_form == self.rhs,\
                 self.u, self.boundary_conditions)
