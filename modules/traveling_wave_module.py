@@ -8,7 +8,6 @@
 import fenics as fe
 import numpy as np
 import mshr as mesher
-#import sympy 
 import os
 import re
 import cv2
@@ -21,6 +20,7 @@ import matplotlib.pyplot as plt
 #from mpl_toolkits.mplot3d import Axes3D
 #from scipy.spatial import Delaunay as delaunay
 from scipy.integrate import simps as srule
+from scipy.integrate import odeint as ode_solve
 
 from image_manipulation_module import ImageManipulation
 
@@ -35,16 +35,23 @@ class TravelingWave():
         self.time         = 0
         self.fast_run     = False
         self.model_z_n    = 535
-        self.hole_radius  = 0.2
 
         #self.set_fem_properties()
         self.mode         = 'exp'
-        self.dimension    = 2
-        self.polynomial_degree = 2
+        self.dimension    = 3
+        self.polynomial_degree = 1
         self.mesh_density = 64
         self.x_left       = 0
         self.x_right      = self.L
         self.fps          = 0
+
+        self.hole_coordinates       = None
+        self.hole_radius            = 0.2
+        self.hole_fractional_volume = 0.60
+        self.n_holes                = 80
+        self.use_available_hole_data=False
+        self.original_volume        = 0
+        self.enforce_radius_of_holes = True
 
         self.image_manipulation_obj = ImageManipulation()
 
@@ -88,11 +95,27 @@ class TravelingWave():
         self.function_space = None
 
         self.current_dir  = os.getcwd()
+
         self.postprocessing_dir = os.path.join(self.current_dir,\
                 'postprocessing')
+
         self.fem_solution_storage_dir = os.path.join(self.current_dir,\
                 'solution', self.label, str(self.dimension) + 'D')
+
         self.movie_dir = os.path.join(self.fem_solution_storage_dir, 'movie')
+
+        self.slope_field_dir = os.path.join(self.current_dir,\
+                'solution', self.label, 'slope_field')
+
+        self.slope_field_movie_dir = os.path.join(\
+                self.slope_field_dir, 'movie')
+
+        self.potential_dir = os.path.join(self.current_dir,\
+                'solution', self.label, 'potential')
+
+        self.potential_movie_dir = os.path.join(\
+                self.potential_dir, 'movie')
+
 
         self.u_experimental = None
         self.residual_list  = None
@@ -111,6 +134,18 @@ class TravelingWave():
 
         if not os.path.exists(self.movie_dir):
             os.makedirs(self.movie_dir)
+
+        if not os.path.exists(self.slope_field_dir):
+            os.makedirs(self.slope_field_dir)
+
+        if not os.path.exists(self.slope_field_movie_dir):
+            os.makedirs(self.slope_field_movie_dir)
+
+        if not os.path.exists(self.potential_dir):
+            os.makedirs(self.potential_dir)
+
+        if not os.path.exists(self.potential_movie_dir):
+            os.makedirs(self.potential_movie_dir)
 
         txt   = 'solution.pvd'
         fname = os.path.join(self.fem_solution_storage_dir, txt)
@@ -259,13 +294,23 @@ class TravelingWave():
         fig.savefig('sol.pdf', dpi=300)
 
 #==================================================================
-    def create_movie(self):
+    def create_movie(self,\
+            video_name = 'simulation',\
+            img_dir    = None,\
+            movie_dir  = None,\
+            fps        = None): 
+
+        if img_dir is None: 
+            img_dir = self.fem_solution_storage_dir
+
+        if movie_dir is None: 
+            movie_dir = self.movie_dir
 
         rx = re.compile('(?P<number>\d+)')
         fnames = []
         fnumbers = []
 
-        for f in os.listdir(self.fem_solution_storage_dir):
+        for f in os.listdir(img_dir):
             if '.png' in f:
                 obj = rx.search(f)
                 if obj is not None:
@@ -296,25 +341,29 @@ class TravelingWave():
         elif self.video_format == '.webm':
             fourcc = cv2.VideoWriter_fourcc(*'VP80')
 
-        video_name = 'simulation_' + self.label + '_' +\
+        video_name = video_name + '_' + self.label + '_' +\
                 str(self.dimension) + 'D' + self.video_format
-        video_fname = os.path.join(self.movie_dir, video_name)
+        video_fname = os.path.join(movie_dir, video_name)
 
-        im_path = os.path.join(self.fem_solution_storage_dir, images[0])
+        im_path = os.path.join(img_dir, images[0])
         frame = cv2.imread(im_path)
         height, width, layers = frame.shape
         print('(H,W) = ', np.array(frame.shape)/2)
 
         if self.dimension == 1:
             self.fps = 30
+
         if self.dimension == 2:
             self.fps = 30
+
+        if fps is not None:
+            self.fps = fps
 
         video = cv2.VideoWriter(video_fname, fourcc, self.fps, (width, height))
 
         print('Creating movie:', video_name)
         for im in images:
-            im_path = os.path.join(self.fem_solution_storage_dir, im)
+            im_path = os.path.join(img_dir, im)
             video.write(cv2.imread(im_path))
 
         cv2.destroyAllWindows()
@@ -362,26 +411,64 @@ class TravelingWave():
         self.geometry = mesher.Polygon(domain_vertices)
         self.mesh     = mesher.generate_mesh(self.geometry, 16);
 
+        self.compute_mesh_volume()
+        self.original_volume = self.mesh_volume
+        print('Original volume', self.original_volume)
+        self.generate_holes()
+        #self.compute_hole_fractional_volume()
         self.puncture_mesh()
+        self.compute_mesh_volume()
+        domain_volume = self.mesh_volume
+        print('New volume', domain_volume)
+        self.hole_fractional_volume = 1-domain_volume/self.original_volume
+        print('Hole fractional volume:', self.hole_fractional_volume)
+        print('# holes:', self.n_holes)
+        print('Estimated hole fractional volume:',\
+                self.compute_hole_fractional_volume())
+
+#==================================================================
+    def compute_hole_fractional_volume(self):
+
+        N = self.hole_coordinates.shape[0]
+        hole_area = N * np.pi * self.hole_radius**2
+        return hole_area / self.original_volume
+
+#==================================================================
+    def compute_mesh_volume(self):
+
+        one = fe.Constant(1)
+        DG  = fe.FunctionSpace(self.mesh, 'DG', 0)
+        v   = fe.TestFunction(DG)
+        L   = v * one * fe.dx
+        b   = fe.assemble(L)
+        self.mesh_volume = b.get_local().sum()
 
 #==================================================================
     def generate_holes(self):
 
         fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
-        if os.path.exists(fname):
+        if self.use_available_hole_data and os.path.exists(fname):
             print('Found a file containing the hole data')
-            return np.loadtxt(fname)
+            self.hole_coordinates = np.loadtxt(fname)
+            return
 
         boundary = fe.BoundaryMesh(self.mesh, 'exterior')
         bbtree   = fe.BoundingBoxTree()
         bbtree.build(boundary)
 
         np.random.seed(123)
-        N = 40
-        max_n_tries = 1e6
+
+        N = self.n_holes
+
+        if not self.enforce_radius_of_holes:
+            self.hole_radius = np.sqrt(self.hole_fractional_volume *\
+                    self.mesh_volume / np.pi / N)
+
+        print('Hole radius:', self.hole_radius)
+        gap = 0.15
+        max_n_tries = 1e7
         counter = 0
         L = []
-        gap = 0.1
 
         while len(L) < N and counter < max_n_tries:
 
@@ -405,20 +492,18 @@ class TravelingWave():
             if not rejected:
                 L.append(p)
 
-        L = np.array(L)
+        self.hole_coordinates = np.array(L)
         fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
         np.savetxt(fname, L)
 
         print('Found', N, 'circles in', counter, 'trials')
 
-        return L
 
 #==================================================================
     def puncture_mesh(self): 
 
-        L = self.generate_holes()
 
-        for p in L:
+        for p in self.hole_coordinates:
             circle = mesher.Circle(fe.Point(p), self.hole_radius) 
             self.geometry -= circle
 
@@ -490,6 +575,133 @@ class TravelingWave():
                 self.current_time, error_LI))
 
         self.error_list.append(error_L2) 
+
+#==================================================================
+    def ode_system(self,y,t=0):
+        dy = y*0
+        dy[0] = y[1]
+        dy[1] = -self.wave_speed * y[1] - y[0]*(1-y[0])
+        return dy
+
+#==================================================================
+    def characterize_speed(self):
+
+        N = 200
+        C = np.linspace(0.25,3,N+1)
+        print('dc=', C[1]-C[0])
+        for k,c in enumerate(C):
+            self.wave_speed = c
+            self.slope_field(k)
+            print(k,'is complete')
+            print('-------------')
+
+#==================================================================
+    def make_potential_movie(self):
+
+        self.create_movie('potential',\
+                self.potential_dir,\
+                self.potential_movie_dir,\
+                20)
+
+
+#==================================================================
+    def make_slope_field_movie(self):
+
+        self.create_movie('slope_field',\
+                self.slope_field_dir,\
+                self.slope_field_movie_dir,\
+                10)
+
+
+#==================================================================
+    def characterize_potential(self):
+
+        left  = -0.8
+        right = 1
+        y_lim = 0.35
+        N = 200
+        x_mesh = np.linspace(left,right,N)
+        initial_state = [1,-1]
+        t_start = -10
+        t_final = 18
+        t_mesh = np.linspace(t_start, t_final, 300)
+        dt = t_mesh[1]-t_mesh[0]
+        self.wave_speed = 3
+        potential = lambda x: x**2/2 - x**3/3
+        eps=1e-2
+
+        sol = ode_solve(self.ode_system, initial_state, t_mesh)
+        txt = 'c = ' + '{:0.2f}'.format(self.wave_speed)
+        
+        for index, z in enumerate(sol[:,0]):
+            print('Working on:', index)
+            print('----------------')
+            zp = potential(z)
+            pure_name =  'potential_' + str(index) + '.png'        
+            fname = os.path.join(self.potential_dir, pure_name)
+
+            fig = plt.figure()
+            ax  = fig.add_subplot(111)
+            ax.set_xlabel('z')
+            ax.set_ylabel('U(z)')
+            ax.plot(x_mesh, potential(x_mesh), 'r-',\
+                    linewidth=3, label = 'U(z)')
+            txt = 't='+'{:0.2f}'.format(dt*index)
+            ax.text(-0.6,0,txt)
+
+            ax.plot(z,zp,'ko',markersize=8)
+            ax.set_xlim([left-eps, right+eps])
+            ax.set_ylim([0-eps, y_lim+eps])
+            ax.legend(loc=0)
+            plt.tight_layout()
+            fig.savefig(fname, dpi=300)
+            plt.close('all')
+
+
+        #ax.plot(sol[:,0],potential(sol[:,0]),'b+',markersize=8)
+
+
+        plt.close('all')
+
+
+#==================================================================
+    def slope_field(self, index=0):
+
+        fig = plt.figure()
+        ax  = fig.add_subplot(111)
+        N   = 10
+        left  = -1
+        right = 1
+        x_mesh = np.linspace(left,right,N)
+        y_mesh = np.linspace(left,right,N)
+        X,Y = np.meshgrid(x_mesh, y_mesh)
+        v = np.vstack((X.ravel(), Y.ravel()))
+        Z = self.ode_system(v)
+        U = Z[0].reshape(X.shape)
+        V = Z[1].reshape(Y.shape)
+        norm = np.sqrt(U**2 + V**2)
+        U /= norm
+        V /= norm
+        ax.quiver(X,Y,U,V)
+
+        initial_state = [1,-1]
+        t_start = -100
+        t_final = 100
+        t_mesh = np.linspace(t_start, t_final, 1000)
+
+        sol = ode_solve(self.ode_system, initial_state, t_mesh)
+        txt = 'c = ' + '{:0.2f}'.format(self.wave_speed)
+
+        ax.plot(sol[:,0], sol[:,1], 'b-', linewidth=3, label = txt)
+        ax.set_xlabel('z')
+        ax.set_ylabel("z'")
+        ax.legend(loc=1)
+        plt.tight_layout()
+
+        pure_name =  'slope_field_' + str(index) + '.png'        
+        fname = os.path.join(self.slope_field_dir, pure_name)
+        fig.savefig(fname, dpi=300)
+        plt.close('all')
 
 
 #==================================================================

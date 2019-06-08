@@ -30,8 +30,12 @@ from traveling_wave_module import TravelingWave as PDE
 #==================================================================
 
 obj = PDE()
+#obj.set_data_dirs()
+#obj.characterize_potential()
+#obj.make_potential_movie()
+#exit()
 #obj.run()
-obj.create_movie()
+#obj.create_movie()
 #obj = ImageManipulation()
 #obj.get_radial_plot()
 

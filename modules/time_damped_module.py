@@ -35,7 +35,6 @@ class TimeDamped():
         self.time         = 0
         self.fast_run     = False
         self.model_z_n    = 535
-        self.hole_radius  = 0.2
 
         #self.set_fem_properties()
         self.mode         = 'exp'
@@ -46,6 +45,14 @@ class TimeDamped():
         self.x_left       = 0
         self.x_right      = self.L
         self.fps          = 0
+
+        self.hole_coordinates       = None
+        self.hole_radius            = 0.2
+        self.hole_fractional_volume = 0.60
+        self.n_holes                = 80
+        self.use_available_hole_data=False
+        self.original_volume        = 0
+        self.enforce_radius_of_holes = True
 
         self.image_manipulation_obj = ImageManipulation()
 
@@ -351,26 +358,64 @@ class TimeDamped():
         self.geometry = mesher.Polygon(domain_vertices)
         self.mesh     = mesher.generate_mesh(self.geometry, 16);
 
+        self.compute_mesh_volume()
+        self.original_volume = self.mesh_volume
+        print('Original volume', self.original_volume)
+        self.generate_holes()
+        #self.compute_hole_fractional_volume()
         self.puncture_mesh()
+        self.compute_mesh_volume()
+        domain_volume = self.mesh_volume
+        print('New volume', domain_volume)
+        self.hole_fractional_volume = 1-domain_volume/self.original_volume
+        print('Hole fractional volume:', self.hole_fractional_volume)
+        print('# holes:', self.n_holes)
+        print('Estimated hole fractional volume:',\
+                self.compute_hole_fractional_volume())
+
+#==================================================================
+    def compute_hole_fractional_volume(self):
+
+        N = self.hole_coordinates.shape[0]
+        hole_area = N * np.pi * self.hole_radius**2
+        return hole_area / self.original_volume
+
+#==================================================================
+    def compute_mesh_volume(self):
+
+        one = fe.Constant(1)
+        DG  = fe.FunctionSpace(self.mesh, 'DG', 0)
+        v   = fe.TestFunction(DG)
+        L   = v * one * fe.dx
+        b   = fe.assemble(L)
+        self.mesh_volume = b.get_local().sum()
 
 #==================================================================
     def generate_holes(self):
 
         fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
-        if os.path.exists(fname):
+        if self.use_available_hole_data and os.path.exists(fname):
             print('Found a file containing the hole data')
-            return np.loadtxt(fname)
+            self.hole_coordinates = np.loadtxt(fname)
+            return
 
         boundary = fe.BoundaryMesh(self.mesh, 'exterior')
         bbtree   = fe.BoundingBoxTree()
         bbtree.build(boundary)
 
         np.random.seed(123)
-        N = 40
-        max_n_tries = 1e6
+
+        N = self.n_holes
+
+        if not self.enforce_radius_of_holes:
+            self.hole_radius = np.sqrt(self.hole_fractional_volume *\
+                    self.mesh_volume / np.pi / N)
+
+        print('Hole radius:', self.hole_radius)
+        gap = 0.15
+        max_n_tries = 1e7
         counter = 0
         L = []
-        gap = 0.1
 
         while len(L) < N and counter < max_n_tries:
 
@@ -394,51 +439,24 @@ class TimeDamped():
             if not rejected:
                 L.append(p)
 
-        L = np.array(L)
+        self.hole_coordinates = np.array(L)
         fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
         np.savetxt(fname, L)
 
         print('Found', N, 'circles in', counter, 'trials')
 
-        return L
 
 #==================================================================
     def puncture_mesh(self): 
 
-        L = self.generate_holes()
 
-        for p in L:
+        for p in self.hole_coordinates:
             circle = mesher.Circle(fe.Point(p), self.hole_radius) 
             self.geometry -= circle
 
         self.mesh = mesher.generate_mesh(self.geometry, self.mesh_density);
         print('Done with the mesh generation')
 
-#==================================================================
-    def plot_mesh(self):
-
-        fig = plt.figure()
-        ax  = fig.add_subplot(111)
-
-        for t in self.mesh.cells():
-            points = self.mesh.coordinates()[t]
-
-            if self.dimension == 2:
-                indices = [0,1,2,0]
-                ax.plot(points[indices,0], points[indices,1], 'b-')
-
-            elif self.dimension == 1:
-                ax.plot(points[:,0], points[:,0]*0, 'b-')
-
-
-            #for index, p in zip(t,points):
-                #ax.text(p[0],p[1],str(index),fontsize=8)
-
-        #bmesh    = fe.BoundaryMesh(self.mesh, 'exterior', True)
-        #b_points = bmesh.coordinates()
-
-        fname = os.path.join(self.postprocessing_dir, 'mesh.png')
-        fig.savefig(fname, dpi=300)
 
 #==================================================================
     def set_function_spaces(self):

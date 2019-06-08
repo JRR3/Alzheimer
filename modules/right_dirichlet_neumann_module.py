@@ -37,7 +37,7 @@ class RightDirichletNeumann():
         self.dimension    = 1
         self.polynomial_degree = 2
         self.mesh_density = 50
-        self.dt           = 0.0001
+        self.dt           = 0.1
         self.x_left       = 0
         self.x_right      = self.L
         self.fps          = 3
@@ -442,6 +442,46 @@ class RightDirichletNeumann():
                         self.u[i+1] + 2*self.u[i] -\
                         dx_sq * (1 - self.u[i]) 
                 #print('u[',i-1,']=', self.u[i-1])
+            self.u_n = self.u + 0
+            self.save_snapshot()
+            print('------------------------')
+
+        print('Alles ist gut')
+
+#==================================================================
+    def run_cn(self):
+        self.set_data_dirs()
+        neumann_fun   = lambda t: 0
+        ic_fun        = lambda x: 1/(1+np.exp(100*(x-0.05)))
+        dirichlet_fun = lambda t: 0
+        self.mesh     = np.linspace(0,self.L, self.mesh_density)
+        self.current_time = 0
+        self.u_n = ic_fun(self.mesh)
+        self.save_snapshot()
+        self.u   = self.u_n * 0
+        dx = self.mesh[1]-self.mesh[0]
+        dx_sq = dx * dx
+        k  = self.dt/dx_sq
+
+        print('dx',dx)
+        print('dt',self.dt)
+        print('k',k)
+        while self.current_time < self.final_time: 
+            
+            self.current_time += self.dt
+            print('t(', self.counter, ')= {:0.3f}'.format(self.current_time))
+            self.u[-1] = dirichlet_fun(self.current_time)
+            #print('u[',self.mesh_density-1,']=',self.u[-1])
+            self.u[-2] = self.u[-1] - dx * neumann_fun(self.current_time)
+            #print('u[',self.mesh_density-2,']=',self.u[-2])
+            for i in range(self.mesh_density-2,0,-1):
+                self.u[i-1] = 2 * (self.u[i] - self.u_n[i])/k -\
+                        (\
+                        self.u[i+1] - 2*self.u[i] +\
+                        self.u_n[i+1] - 2*self.u_n[i] + self.u_n[i-1] + \
+                        dx_sq * (2 - (self.u[i] + self.u_n[i]))\
+                        )
+                print('u[',i-1,']=', self.u[i-1])
             self.u_n = self.u + 0
             self.save_snapshot()
             print('------------------------')
