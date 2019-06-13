@@ -17,7 +17,7 @@ import cv2
 import matplotlib as mpl
 mpl.rcParams.update({'font.size': 18})
 import matplotlib.pyplot as plt
-#from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d import Axes3D
 #from scipy.spatial import Delaunay as delaunay
 from scipy.integrate import simps as srule
 from scipy.integrate import odeint as ode_solve
@@ -35,16 +35,23 @@ class TravelingWave():
         self.time         = 0
         self.fast_run     = False
         self.model_z_n    = 535
+        self.use_previously_stored_mesh = True
+        self.n_columns    = 35
+        self.keep_only_network = False
+
+
 
         #self.set_fem_properties()
         self.mode         = 'exp'
         self.dimension    = 3
         self.polynomial_degree = 1
-        self.mesh_density = 64
+        self.mesh_density = 32
         self.x_left       = 0
         self.x_right      = self.L
         self.fps          = 0
 
+        self.n_squares       = 9
+        self.square_fraction = 0.25
         self.hole_coordinates       = None
         self.hole_radius            = 0.2
         self.hole_fractional_volume = 0.60
@@ -60,21 +67,41 @@ class TravelingWave():
             self.initial_time = 4.4
             self.final_time   = 126
 
-        if self.dimension == 2:
+        elif self.dimension == 2:
             self.dt           = 0.01
             self.initial_time = 0
             self.final_time   = 8
 
-        self.current_time    = None
+        elif self.dimension == 3:
+            self.dt           = 0.01
+            self.initial_time = 0
+            self.final_time   = 8
+
+        self.current_time    = 0
         self.counter         = 0
         self.boundary_points = None
         self.figure_format   = '.png'
         self.video_format    = '.webm'
 
-        self.alpha        = 4.3590
-        self.beta         = -0.156
-        self.lam          = 0
-        self.kappa        = 30
+        if self.dimension == 2:
+            self.alpha        = 4.3590
+            self.beta         = -0.156
+            self.lam          = 0
+            self.kappa        = 30
+
+        elif self.dimension == 3:
+            if self.keep_only_network: 
+                self.alpha        = 0.1666666666
+                self.beta         = 0.0555555555
+                self.gamma        = 0
+                self.lam          = 0
+                self.kappa        = 50
+            else:
+                self.alpha        = 0
+                self.beta         = 0
+                self.gamma        = 0
+                self.lam          = 0
+                self.kappa        = 50
 
         self.diffusion_coefficient = 1.0
 
@@ -102,7 +129,18 @@ class TravelingWave():
         self.fem_solution_storage_dir = os.path.join(self.current_dir,\
                 'solution', self.label, str(self.dimension) + 'D')
 
+        if self.dimension == 3:
+
+            self.fem_solution_storage_dir =\
+                    os.path.join(self.fem_solution_storage_dir,\
+                    str(self.n_columns) + '_columns')
+
+            self.mesh_fname =\
+                    os.path.join(self.fem_solution_storage_dir,\
+                    'porous_mesh_' + str(self.n_columns) + '_columns.xml')
+
         self.movie_dir = os.path.join(self.fem_solution_storage_dir, 'movie')
+        self.vtk_dir   = os.path.join(self.fem_solution_storage_dir, 'vtk')
 
         self.slope_field_dir = os.path.join(self.current_dir,\
                 'solution', self.label, 'slope_field')
@@ -124,6 +162,14 @@ class TravelingWave():
         self.plot_symmetric    = False
 
 #==================================================================
+    def plot_mesh(self):
+
+        txt = 'pow(x[0]-0.5,2) + pow(x[1]-0.5,2) + pow(x[2]-0.5,2)'
+        f = fe.Expression(txt, degree=2)
+        self.u_n = fe.interpolate(f, self.function_space)
+        self.save_snapshot()
+
+#==================================================================
     def set_data_dirs(self):
 
         if not os.path.exists(self.postprocessing_dir):
@@ -134,6 +180,9 @@ class TravelingWave():
 
         if not os.path.exists(self.movie_dir):
             os.makedirs(self.movie_dir)
+
+        if not os.path.exists(self.vtk_dir):
+            os.makedirs(self.vtk_dir)
 
         if not os.path.exists(self.slope_field_dir):
             os.makedirs(self.slope_field_dir)
@@ -148,7 +197,7 @@ class TravelingWave():
             os.makedirs(self.potential_movie_dir)
 
         txt   = 'solution.pvd'
-        fname = os.path.join(self.fem_solution_storage_dir, txt)
+        fname = os.path.join(self.vtk_dir, txt)
         self.vtkfile = fe.File(fname)
 
 #==================================================================
@@ -159,12 +208,31 @@ class TravelingWave():
 #==================================================================
     def create_boundary_conditions(self):
 
+        print('Creating boundary conditions')
+
+        tol = 1e-6
+
+        if self.dimension == 3:
+            self.boundary_fun = fe.Constant(1)
+
+            if self.keep_only_network:
+                def is_on_the_boundary(x, on_boundary):
+                    return on_boundary and\
+                            x[2] < tol and\
+                            x[1] < 0.1 and\
+                            x[0] < 0.25
+            else:
+                def is_on_the_boundary(x, on_boundary):
+                    return on_boundary and\
+                            x[2] < tol and\
+                            x[1] < 0.1 and\
+                            x[0] < 0.1
+
         if self.dimension == 2:
             self.boundary_fun = fe.Constant(1)
             def is_on_the_boundary(x, on_boundary):
                 return on_boundary and 4.34 < x[0]
 
-        tol = 1e-6
         if self.dimension == 1:
 
             c    = -5 / np.sqrt(6)
@@ -181,7 +249,21 @@ class TravelingWave():
 #==================================================================
     def set_initial_conditions(self):
 
+        print('Creating initial conditions')
         self.current_time = self.initial_time 
+
+        if self.dimension == 3:
+            txt = 'exp(-kappa *'  +\
+                    '(pow(x[0]-alpha,2) +' +\
+                    'pow(x[1]-beta,2) + pow(x[2]-gamma,2)))'
+            self.ic_fun = fe.Expression(txt,\
+                    degree = 2,\
+                    alpha  = self.alpha,\
+                    beta   = self.beta,\
+                    gamma  = self.gamma,\
+                    kappa  = self.kappa)
+
+            self.u_n = fe.project(self.ic_fun, self.function_space)
 
         if self.dimension == 2:
             self.ic_fun = fe.Expression(\
@@ -200,6 +282,7 @@ class TravelingWave():
         self.u = fe.Function(self.function_space)
 
         #self.compute_error()
+        print('Storing initial state')
         self.save_snapshot()
 
 #==================================================================
@@ -208,7 +291,7 @@ class TravelingWave():
         if self.fast_run:
             return
 
-        if self.dimension == 2:
+        if 1 < self.dimension:
             self.vtkfile << (self.u_n, self.current_time)
             self.counter += 1
             return
@@ -301,7 +384,7 @@ class TravelingWave():
             fps        = None): 
 
         if img_dir is None: 
-            img_dir = self.fem_solution_storage_dir
+            img_dir = self.movie_dir
 
         if movie_dir is None: 
             movie_dir = self.movie_dir
@@ -353,7 +436,10 @@ class TravelingWave():
         if self.dimension == 1:
             self.fps = 30
 
-        if self.dimension == 2:
+        elif self.dimension == 2:
+            self.fps = 30
+
+        elif self.dimension == 3:
             self.fps = 30
 
         if fps is not None:
@@ -384,15 +470,319 @@ class TravelingWave():
         if self.dimension == 2: 
             self.mesh = fe.UnitSquareMesh(nx, ny)
 
-        #self.plot_mesh()
 
 #==================================================================
     def create_mesh(self):
 
         if self.mode == 'test' or self.dimension == 1:
             self.create_simple_mesh()
-        else:
+
+        elif self.dimension == 2:
             self.create_coronal_section_mesh(self.model_z_n)
+
+        elif self.dimension == 3:
+            self.create_cocontinuous_mesh()
+
+#==================================================================
+    def create_base_net(self):
+
+        square_jump = 1/self.n_squares
+        r = square_jump * self.square_fraction
+
+        y_square_jump = np.array([0, square_jump, 0])
+        x_square_jump = np.array([square_jump, 0, 0]) 
+        geo = None
+
+
+        '''Lower left corner'''
+        p = np.zeros(3) + 0.
+        top    = p + 2*y_square_jump
+        bottom = p + 2*x_square_jump 
+
+        while (self.point_is_inside(p + 2*y_square_jump)):
+
+            cylinder = mesher.Cylinder(fe.Point(top), fe.Point(bottom), r, r)
+            if geo is None:
+                geo = cylinder
+            else:
+                geo += cylinder
+
+            p      += 2*y_square_jump
+            top    += 2*y_square_jump
+            bottom += 2*x_square_jump 
+
+
+
+
+
+        '''Upper right corner'''
+        p = np.ones(3)
+        p[-1] = 0.
+        top    = p - 2*y_square_jump
+        bottom = p - 2*x_square_jump 
+
+        while (self.point_is_inside(p - 2*y_square_jump)):
+
+            cylinder = mesher.Cylinder(fe.Point(top), fe.Point(bottom), r, r)
+            geo += cylinder
+
+            p      -= 2*y_square_jump
+            top    -= 2*y_square_jump
+            bottom -= 2*x_square_jump 
+
+
+
+
+
+        '''Lower Right corner'''
+        p = np.zeros(3)
+        p[0] = 1.
+        top    = p + 2*y_square_jump
+        bottom = p - 2*x_square_jump 
+
+        while (self.point_is_inside(p + 2*y_square_jump)):
+
+            cylinder = mesher.Cylinder(fe.Point(top), fe.Point(bottom), r, r)
+            geo += cylinder
+
+            p      += 2*y_square_jump
+            top    += 2*y_square_jump
+            bottom -= 2*x_square_jump 
+
+
+
+
+
+        '''Upper left corner'''
+        p = np.zeros(3)
+        p[1] = 1.
+        top    = p - 2*y_square_jump
+        bottom = p + 2*x_square_jump 
+
+        while (self.point_is_inside(p - 2*y_square_jump)):
+
+            cylinder = mesher.Cylinder(fe.Point(top), fe.Point(bottom), r, r)
+            geo += cylinder
+
+            p      -= 2*y_square_jump
+            top    -= 2*y_square_jump
+            bottom += 2*x_square_jump 
+
+        print('Finished creating base net')
+        return geo
+
+#==================================================================
+    def extrude_base_net(self):
+
+        net = self.create_base_net()
+
+        square_jump = 1/self.n_squares
+        r = square_jump * self.square_fraction
+        n_levels = 3
+        delta = 1/(n_levels + 1)
+        z_jump = np.array([0,0,delta])
+
+        p = np.zeros(3)
+        geo = None
+
+        p += z_jump
+        for k in range(n_levels):
+            if geo is None:
+                geo = mesher.CSGTranslation(net, fe.Point(p))
+            else:
+                geo += mesher.CSGTranslation(net, fe.Point(p))
+            p += z_jump
+
+        print('Finished creating extruded mesh')
+        return geo
+
+#==================================================================
+    def create_cocontinuous_mesh(self):
+
+        if self.use_previously_stored_mesh:
+
+            self.mesh = fe.Mesh(self.mesh_fname)
+            print('Mesh has been loaded from file')
+            return
+
+        geo     = mesher.Box(fe.Point(0,0,0), fe.Point(1,1,1))
+        net     = self.extrude_base_net()
+        columns = self.create_cylindrical_columns()
+        net    += columns
+
+        if self.keep_only_network: 
+            geo  = net
+        else:
+            geo -= net
+
+        print('Finished creating the geometry')
+        self.mesh = mesher.generate_mesh(geo, self.mesh_density);
+
+        print('Writing mesh to file')
+        mesh_file = fe.File(self.mesh_fname)
+        mesh_file << self.mesh
+        print('Finished writing mesh to file')
+
+
+#==================================================================
+    def create_base_grid_using_points(self):
+
+        L = []
+        z0= 0.
+
+        square_jump = 1/self.n_squares
+        right_square_jump = np.array([+square_jump, square_jump, 0])
+        left_square_jump  = np.array([-square_jump, square_jump, 0])
+
+        r = square_jump * self.square_fraction
+
+        n_jumps = 2
+        jump    = square_jump/(2 * n_jumps)
+
+        left_up   = jump * np.array([-1,+1,0])
+        left_down = jump * np.array([-1,-1,0])
+        right_down= jump * np.array([+1,-1,0])
+        right_up  = jump * np.array([+1,+1,0])
+
+
+        #Negative slope
+        reference_point  = np.array([0, 0, z0])
+        reference_point += right_square_jump
+
+        while (self.point_is_inside(reference_point)):
+            L.append(reference_point + 0)
+
+            p = reference_point + 0
+
+            #Left Up
+            p += left_up
+            while (self.point_is_inside(p)):
+                L.append(p+0)
+                p += left_up
+
+            p = reference_point + 0
+
+            #Right down 
+            p += right_down
+            while (self.point_is_inside(p)):
+                L.append(p+0)
+                p += right_down
+
+
+            reference_point += right_square_jump
+
+        '''---------------------------------------'''
+        #Positive slope
+        reference_point  = np.array([1,0,z0])
+        reference_point += left_square_jump
+
+        while (self.point_is_inside(reference_point)):
+            L.append(reference_point + 0)
+
+            p = reference_point + 0
+
+            #Right Up
+            p += right_up
+            while (self.point_is_inside(p)):
+                L.append(p+0)
+                p += right_up
+
+            p = reference_point + 0
+
+            #Left down 
+            p += left_down
+            while (self.point_is_inside(p)):
+                L.append(p+0)
+                p += left_down
+
+            reference_point += left_square_jump
+
+#==================================================================
+    def create_cylindrical_columns(self):
+
+        B = []
+        square_jump = 1/self.n_squares
+        r = square_jump * self.square_fraction
+
+        short_jump = np.array([square_jump/2, 0, 0])
+        long_jump  = np.array([square_jump, 0, 0])
+
+        reference_point = np.array([square_jump/2, square_jump/2, 0])
+        y_jump = np.array([0, square_jump/2, 0])
+
+        state = 2
+
+        while(self.point_is_inside(reference_point)):
+
+            p = reference_point + 0
+
+            if state % 2 != 0:
+                p_jump = short_jump
+            else:
+                p_jump = long_jump
+
+            if state % 4 != 0:
+                p += p_jump
+
+            state += 1
+            inner_state = 0
+
+            while(self.point_is_inside(p)):
+
+                if np.array_equal(p_jump, short_jump):
+                    break
+
+                if inner_state % 2 == 0:
+                    B.append(p+0)
+
+                p += p_jump
+                inner_state += 1
+
+            reference_point += y_jump
+
+
+        B = np.array(B)
+        geo = None
+
+        counter = 0
+        n_seeds = len(B)
+        chosen_columns = []
+        np.random.seed(123)
+
+        while counter < self.n_columns:
+
+            if counter == 0:
+                '''Necessary for initial and boundary conditions'''
+                rand_int = 0
+            else:
+                rand_int = np.random.randint(0, n_seeds)
+
+            if rand_int in chosen_columns:
+                continue
+
+            p = B[rand_int]
+            chosen_columns.append(rand_int)
+            counter += 1
+            top     = p + 0
+            top[-1] = 1
+            bottom  = p + 0
+            bottom[-1] = 0
+            cylinder = mesher.Cylinder(fe.Point(top), fe.Point(bottom), r, r)
+
+            if geo is None:
+                geo = cylinder
+            else:
+                geo += cylinder
+
+        print('Finished creating', counter, 'columns')
+        return geo
+
+
+
+#==================================================================
+    def point_is_inside(self, p):
+        eps = 1e-2
+        return np.all(-eps < p) and np.all(p < 1+eps)
 
 #==================================================================
     def create_coronal_section_mesh(self, model_z_n = 0):
@@ -414,7 +804,7 @@ class TravelingWave():
         self.compute_mesh_volume()
         self.original_volume = self.mesh_volume
         print('Original volume', self.original_volume)
-        self.generate_holes()
+        self.generate_holes_2d()
         #self.compute_hole_fractional_volume()
         self.puncture_mesh()
         self.compute_mesh_volume()
@@ -427,11 +817,24 @@ class TravelingWave():
                 self.compute_hole_fractional_volume())
 
 #==================================================================
+    def sphere_volume(self, r):
+
+        factor = np.pi
+
+        if self.dimension == 3:
+            factor *= 4/3
+
+        volume = factor * np.power(r, self.dimension)
+
+        return volume
+
+#==================================================================
     def compute_hole_fractional_volume(self):
 
         N = self.hole_coordinates.shape[0]
-        hole_area = N * np.pi * self.hole_radius**2
-        return hole_area / self.original_volume
+        empty_space = N * self.sphere_volume(self.hole_radius)
+
+        return empty_space / self.original_volume
 
 #==================================================================
     def compute_mesh_volume(self):
@@ -444,7 +847,58 @@ class TravelingWave():
         self.mesh_volume = b.get_local().sum()
 
 #==================================================================
-    def generate_holes(self):
+    def generate_holes_3d(self):
+
+        fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
+        if self.use_available_hole_data and os.path.exists(fname):
+            print('Found a file containing the hole data')
+            self.hole_coordinates = np.loadtxt(fname)
+            return
+
+        boundary = fe.BoundaryMesh(self.mesh, 'exterior')
+        bbtree   = fe.BoundingBoxTree()
+        bbtree.build(boundary)
+
+        np.random.seed(123)
+
+        N = self.n_holes
+
+        print('Hole radius:', self.hole_radius)
+        gap = 0.07
+        max_n_tries = 1e7
+        counter = 0
+        L = []
+
+        while len(L) < N and counter < max_n_tries:
+
+            counter += 1
+            x = np.random.rand()*8 - 4
+            y = np.random.rand()*4.8 - 2.4
+            p = np.array([x,y])
+            p_fenics = fe.Point(p)
+            _, distance_to_boundary = bbtree.compute_closest_entity(p_fenics)
+
+            rejected = False
+
+            if distance_to_boundary < self.hole_radius + gap:
+                continue
+
+            for c in L: 
+                if np.linalg.norm(c-p) < 2*self.hole_radius + gap:
+                    rejected = True
+                    break
+
+            if not rejected:
+                L.append(p)
+
+        self.hole_coordinates = np.array(L)
+        fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
+        np.savetxt(fname, L)
+
+        print('Found', N, 'circles in', counter, 'trials')
+
+#==================================================================
+    def generate_holes_2d(self):
 
         fname = os.path.join(self.fem_solution_storage_dir, 'holes.txt')
         if self.use_available_hole_data and os.path.exists(fname):
@@ -502,7 +956,6 @@ class TravelingWave():
 #==================================================================
     def puncture_mesh(self): 
 
-
         for p in self.hole_coordinates:
             circle = mesher.Circle(fe.Point(p), self.hole_radius) 
             self.geometry -= circle
@@ -533,6 +986,8 @@ class TravelingWave():
 #==================================================================
     def create_bilinear_form_and_rhs(self):
 
+
+        print('Creating bilinear form')
 
         # Define variational problem
         u = fe.TrialFunction(self.function_space)
@@ -711,6 +1166,7 @@ class TravelingWave():
         self.create_rhs_fun()
         self.create_mesh()
         self.set_function_spaces()
+        #self.plot_mesh()
         self.dofs_to_coordinates()
         self.create_boundary_conditions()
         self.set_initial_conditions()

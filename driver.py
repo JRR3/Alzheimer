@@ -34,8 +34,8 @@ obj = PDE()
 #obj.characterize_potential()
 #obj.make_potential_movie()
 #exit()
-#obj.run()
-#obj.create_movie()
+obj.run()
+#obj.create_movie('fem_simulation')
 #obj = ImageManipulation()
 #obj.get_radial_plot()
 
@@ -55,7 +55,6 @@ obj = PDE()
 #obj.full_brain_mesh()
 #obj.plot_coordinate_map()
 #obj.run()
-#obj.create_movie()
 
 
 
