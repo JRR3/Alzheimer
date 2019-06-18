@@ -31,12 +31,12 @@ class TravelingWave():
 
         self.label        = 'TW'
         self.n_components = 0
-        self.L            = 250
+        self.L            = 2
         self.time         = 0
         self.fast_run     = False
         self.model_z_n    = 535
-        self.use_previously_stored_mesh = True
-        self.n_columns    = 35
+        self.use_previously_stored_mesh = False
+        self.n_columns    = 20
         self.keep_only_network = False
 
 
@@ -45,7 +45,7 @@ class TravelingWave():
         self.mode         = 'exp'
         self.dimension    = 3
         self.polynomial_degree = 1
-        self.mesh_density = 32
+        self.mesh_density = 16
         self.x_left       = 0
         self.x_right      = self.L
         self.fps          = 0
@@ -75,7 +75,7 @@ class TravelingWave():
         elif self.dimension == 3:
             self.dt           = 0.01
             self.initial_time = 0
-            self.final_time   = 8
+            self.final_time   = 5*self.dt
 
         self.current_time    = 0
         self.counter         = 0
@@ -516,7 +516,7 @@ class TravelingWave():
 
 
         '''Upper right corner'''
-        p = np.ones(3)
+        p = self.L * np.ones(3)
         p[-1] = 0.
         top    = p - 2*y_square_jump
         bottom = p - 2*x_square_jump 
@@ -536,7 +536,7 @@ class TravelingWave():
 
         '''Lower Right corner'''
         p = np.zeros(3)
-        p[0] = 1.
+        p[0] = self.L
         top    = p + 2*y_square_jump
         bottom = p - 2*x_square_jump 
 
@@ -555,7 +555,7 @@ class TravelingWave():
 
         '''Upper left corner'''
         p = np.zeros(3)
-        p[1] = 1.
+        p[1] = self.L
         top    = p - 2*y_square_jump
         bottom = p + 2*x_square_jump 
 
@@ -579,7 +579,7 @@ class TravelingWave():
         square_jump = 1/self.n_squares
         r = square_jump * self.square_fraction
         n_levels = 3
-        delta = 1/(n_levels + 1)
+        delta = self.L/(n_levels + 1)
         z_jump = np.array([0,0,delta])
 
         p = np.zeros(3)
@@ -605,7 +605,8 @@ class TravelingWave():
             print('Mesh has been loaded from file')
             return
 
-        geo     = mesher.Box(fe.Point(0,0,0), fe.Point(1,1,1))
+        p = self.L * np.ones(3)
+        geo     = mesher.Box(fe.Point(0,0,0), fe.Point(p))
         net     = self.extrude_base_net()
         columns = self.create_cylindrical_columns()
         net    += columns
@@ -782,7 +783,7 @@ class TravelingWave():
 #==================================================================
     def point_is_inside(self, p):
         eps = 1e-2
-        return np.all(-eps < p) and np.all(p < 1+eps)
+        return np.all(-eps < p) and np.all(p < self.L+eps)
 
 #==================================================================
     def create_coronal_section_mesh(self, model_z_n = 0):
